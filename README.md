@@ -2,6 +2,10 @@
 
 Custom BibleMate AI MCP server
 
+# Requirement
+
+BibleMate AI version 0.0.68+
+
 # Usage
 
 Copy content into [AgentMake AI](https://github.com/eliranwong/agentmake) user directory `~/agentmake` to run a custom MCP server with [BibleMate AI](https://github.com/eliranwong/biblemate).
