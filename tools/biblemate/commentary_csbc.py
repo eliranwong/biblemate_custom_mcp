@@ -16,7 +16,8 @@ def commentary_cbsc(messages, **kwargs):
 
         command = f"COMMENTARY:::CBSC:::{ref}"
 
-        run_uba_api(command)
+        output = run_uba_api(command)
+        print(output)
     
     return ""
 

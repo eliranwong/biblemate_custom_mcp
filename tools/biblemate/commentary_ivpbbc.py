@@ -16,7 +16,8 @@ def commentary_ivpbbc(messages, **kwargs):
 
         command = f"COMMENTARY:::IVPBBC:::{ref}"
 
-        run_uba_api(command)
+        output = run_uba_api(command)
+        print(output)
     
     return ""
 

@@ -4,7 +4,7 @@ Custom BibleMate AI MCP server
 
 # Requirement
 
-BibleMate AI version 0.0.68+
+BibleMate AI version 0.0.69+
 
 # Usage
 
