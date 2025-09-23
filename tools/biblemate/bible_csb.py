@@ -3,7 +3,7 @@ TOOL_SCHEMA = {}
 TOOL_DESCRIPTION = """Read CSB bible verses."""
 
 def bible_csb(messages, **kwargs):
-    from biblemate.core.bible_db import run_uba_api
+    from biblemate.uba.api import run_uba_api
     from agentmake.plugins.uba.lib.BibleParser import BibleVerseParser
     import re
 

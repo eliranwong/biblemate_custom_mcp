@@ -3,7 +3,7 @@ TOOL_SCHEMA = {}
 TOOL_DESCRIPTION = """Read NLT bible verses."""
 
 def bible_nlt(messages, **kwargs):
-    from biblemate.core.bible_db import run_uba_api
+    from biblemate.uba.api import run_uba_api
     from agentmake.plugins.uba.lib.BibleParser import BibleVerseParser
     import re
 

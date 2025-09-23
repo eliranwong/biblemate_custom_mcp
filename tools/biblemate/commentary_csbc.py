@@ -3,7 +3,7 @@ TOOL_SCHEMA = {}
 TOOL_DESCRIPTION = """Read bible commentary - Cambridge Bible for Schools and Colleges [57 vol.] (CBSC)."""
 
 def commentary_cbsc(messages, **kwargs):
-    from biblemate.core.bible_db import run_uba_api
+    from biblemate.uba.api import run_uba_api
     from agentmake.plugins.uba.lib.BibleParser import BibleVerseParser
 
     command = messages[-1].get("content", "")

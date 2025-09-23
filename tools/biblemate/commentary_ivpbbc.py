@@ -3,7 +3,7 @@ TOOL_SCHEMA = {}
 TOOL_DESCRIPTION = """Read bible commentary - IVP Bible Background Commentary (IVPBBC)."""
 
 def commentary_ivpbbc(messages, **kwargs):
-    from biblemate.core.bible_db import run_uba_api
+    from biblemate.uba.api import run_uba_api
     from agentmake.plugins.uba.lib.BibleParser import BibleVerseParser
 
     command = messages[-1].get("content", "")
