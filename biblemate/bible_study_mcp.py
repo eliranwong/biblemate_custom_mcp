@@ -1,7 +1,7 @@
 import logging, json, os
 from fastmcp import FastMCP
 from fastmcp.prompts.prompt import PromptMessage, TextContent
-from agentmake import agentmake
+from agentmake import agentmake, DEVELOPER_MODE, readTextFile
 from biblemate import BIBLEMATEDATA, AGENTMAKE_CONFIG, config
 from biblemate.uba.bible import search_bible
 from biblemate.uba.api import run_uba_api
@@ -18,53 +18,89 @@ mcp = FastMCP(name="BibleMate AI")
 def getResponse(messages:list) -> str:
     return messages[-1].get("content") if messages and "content" in messages[-1] else "Error!"
 
-@mcp.resource("resource://audio")
-def audio() -> str:
-    """UBA Bible Audio"""
-    resources = json.loads(run_uba_api(".resources"))
-    return "\n".join([f"- `{r}`" for r in resources["bibleAudioModules"]])
+@mcp.resource("resource://info")
+def info() -> str:
+    """Display BibleMate AI information"""
+    info = "BibleMate AI " + readTextFile(os.path.join(os.path.dirname(os.path.realpath(__file__)), "version.txt"))
+    info += "\n\nSource: https://github.com/eliranwong/biblemate\nDeveloper: Eliran Wong"
+    return info
+
+@mcp.resource("uba://{command}")
+def uba(command:str) -> str:
+    """Execute an UBA command; a valid UBA command must be given, e.g. `//uba/John 3:16`; do not use this prompt if you are not sure what you are doing"""
+    return run_uba_api(command)
+
+if DEVELOPER_MODE:
+    @mcp.resource("resource://audio")
+    def audio() -> str:
+        """Bible Audio"""
+        resources = json.loads(run_uba_api(".resources"))
+        return "\n".join([f"- `{r}`" for r in resources["bibleAudioModules"]])
 
 @mcp.resource("resource://bibles")
 def bibles() -> dict:
-    """UBA Bibles; usage examples: `//bible/John 3:16-18`, `//bible/KJV/John 3:16-18; Deut 6:4`"""
+    """Bibles; prompt examples: `//bible/John 3:16-18`, `//bible/KJV/John 3:16-18; Deut 6:4`"""
     resources = json.loads(run_uba_api(".resources"))
     return dict(zip(resources["bibleListAbb"], resources["bibleList"]))
 
 @mcp.resource("bible://{module}/{reference}")
-def bible(module:str, reference:str) -> dict:
-    """UBA Bible; usage examples: `//bible/John 3:16-18`, `//bible/KJV/John 3:16-18; Deut 6:4`"""
+def bible(module:str, reference:str) -> str:
+    """Bible; prompt examples: `//bible/John 3:16-18`, `//bible/KJV/John 3:16-18; Deut 6:4`"""
+    reference = BibleVerseParser(False).extractAllReferencesReadable(reference)
+    if not reference:
+        return "Please provide a valid Bible reference to complete your request."
     return run_uba_api(f"BIBLE:::{module}::{reference}")
+
+@mcp.resource("chapter://{module}/{reference}")
+def chapter(module:str, reference:str) -> str:
+    """retrieve a whole Bible chapter; bible chapter reference must be given, e.g. John 3"""
+    from agentmake.plugins.uba.lib.BibleParser import BibleVerseParser
+    import re
+    refs = re.sub("[Cc]hapter ([0-9])", r"\1", reference)
+    refs = BibleVerseParser(False).extractAllReferencesReadable(refs)
+    if not refs:
+        return "Please provide a valid Bible reference to complete your request."
+    output = []
+    for ref in refs.split("; "):
+        output.append("# "+re.sub("\n([0-9])", r"\n* \1", run_uba_api(f"CHAPTER:::{module}:::{ref}")).replace("\n# ", "\n## "))
+    return "\n\n".join(output)
 
 @mcp.resource("resource://commentaries")
 def commentaries() -> dict:
-    """UBA Commentaries; usage examples: `//commentary/John 3:16`, `//commentary/CBSC/John 3:16`"""
+    """Commentaries; prompt examples: `//commentary/John 3:16`, `//commentary/CBSC/John 3:16`"""
     resources = json.loads(run_uba_api(".resources"))
     return dict(zip(resources["commentaryListAbb"], resources["commentaryList"]))
 
 @mcp.resource("commentary://{module}/{reference}")
-def commentary(module:str, reference:str) -> dict:
-    """UBA Commentary; usage examples: `//commentary/John 3:16`, `//commentary/CBSC/John 3:16`"""
+def commentary(module:str, reference:str) -> str:
+    """Commentary; prompt examples: `//commentary/John 3:16`, `//commentary/CBSC/John 3:16`"""
     return run_uba_api(f"COMMENTARY:::{module}::{reference}")
 
-@mcp.resource("resource://data")
-def data() -> str:
-    """UBA Data; UBA command example: `DATA:::Bible Chronology`"""
-    resources = json.loads(run_uba_api(".resources"))
-    return "\n".join([f"- `{r}`" for r in resources["dataList"]])
+@mcp.resource("treasury://{reference}")
+def treasury(reference:str) -> str:
+    """Treasury of Scripture Knowledge (Enhance); prompt examples: `//treasury/John 3:16`, `//treasury/Deut 6:4`"""
+    return run_uba_api(f"TSKE:::{config.default_bible}::{reference}")
+
+if DEVELOPER_MODE:
+    @mcp.resource("resource://data")
+    def data() -> str:
+        """Data; UBA command example: `DATA:::Bible Chronology`"""
+        resources = json.loads(run_uba_api(".resources"))
+        return "\n".join([f"- `{r}`" for r in resources["dataList"]])
 
 @mcp.resource("resource://dictionaries")
 def dictionaries() -> dict:
-    """UBA Dictionaries; usage examples: `//dictionary/Jesus`, `//dictionary/Israel`"""
+    """Dictionaries; prompt examples: `//dictionary/Jesus`, `//dictionary/Israel`"""
     resources = json.loads(run_uba_api(".resources"))
     return dict(zip(resources["dictionaryListAbb"], resources["dictionaryList"]))
 
-dictionary_db = os.path.join(BIBLEMATEDATA, "data", "dictionary.data")
+dictionary_db = os.path.join(BIBLEMATEDATA, "dictionary.db")
 if os.path.isfile(dictionary_db):
     @mcp.resource("dictionary://{query}")
     def dictionary(query:str) -> Union[str, list]:
-        """UBA Dictionary; usage examples: `//dictionary/Jesus`, `//dictionary/Israel`"""
+        """Dictionary; prompt examples: `//dictionary/Jesus`, `//dictionary/Israel`"""
         from biblemate.uba.search import UBASearches
-        dictionary_db = os.path.join(BIBLEMATEDATA, "data", "dictionary.data")
+        dictionary_db = os.path.join(BIBLEMATEDATA, "dictionary.db")
         return UBASearches.search_data(
             db_file=dictionary_db,
             sql_table="Dictionary",
@@ -72,25 +108,26 @@ if os.path.isfile(dictionary_db):
             top_k=config.max_semantic_matches,
         )
 
-@mcp.resource("resource://docs")
-def docs() -> str:
-    """UBA Documents"""
-    resources = json.loads(run_uba_api(".resources"))
-    return "\n".join([f"- `{r}`" for r in resources["docxList"]])
+if DEVELOPER_MODE:
+    @mcp.resource("resource://docs")
+    def docs() -> str:
+        """Documents"""
+        resources = json.loads(run_uba_api(".resources"))
+        return "\n".join([f"- `{r}`" for r in resources["docxList"]])
 
 @mcp.resource("resource://encyclopedias")
 def encyclopedias() -> dict:
-    """UBA Encyclopedias; usage examples: `//encyclopedia/Jesus`, `//encyclopedia/ISB/Jesus`"""
+    """Encyclopedias; prompt examples: `//encyclopedia/Jesus`, `//encyclopedia/ISB/Jesus`"""
     resources = json.loads(run_uba_api(".resources"))
     return dict(zip(resources["encyclopediaListAbb"], resources["encyclopediaList"]))
 
-encyclopedia_db = os.path.join(BIBLEMATEDATA, "data", "encyclopedia.data")
+encyclopedia_db = os.path.join(BIBLEMATEDATA, "encyclopedia.db")
 if os.path.exists(encyclopedia_db):
     @mcp.resource("encyclopedia://{module}/{query}")
     def encyclopedia(module: str, query:str) -> Union[str, list]:
-        """UBA Encyclopedia; usage examples: `//encyclopedia/Jesus`, `//encyclopedia/ISB/Jesus`"""
+        """Encyclopedia; prompt examples: `//encyclopedia/Jesus`, `//encyclopedia/ISB/Jesus`"""
         from biblemate.uba.search import UBASearches
-        encyclopedia_db = os.path.join(BIBLEMATEDATA, "data", "encyclopedia.data")
+        encyclopedia_db = os.path.join(BIBLEMATEDATA, "encyclopedia.db")
         return UBASearches.search_data(
             db_file=encyclopedia_db,
             sql_table=module,
@@ -98,53 +135,540 @@ if os.path.exists(encyclopedia_db):
             top_k=config.max_semantic_matches,
         )
 
-@mcp.resource("resource://epubs")
-def epubs() -> str:
-    """UBA EPUBs"""
-    resources = json.loads(run_uba_api(".resources"))
-    return "\n".join([f"- `{r}`" for r in resources["epubList"]])
+if DEVELOPER_MODE:
+    @mcp.resource("resource://epubs")
+    def epubs() -> str:
+        """EPUBs"""
+        resources = json.loads(run_uba_api(".resources"))
+        return "\n".join([f"- `{r}`" for r in resources["epubList"]])
 
 @mcp.resource("resource://lexicons")
 def lexicons() -> str:
-    """UBA Lexicons; UBA command example: `LEXICON:::G25` or `LEXICON:::H3478`"""
+    """Lexicons; prompt examples: `//lexicon/G25`, `//lexicon/TBESH/G25`, `//lexicon/TBESH/H3478`"""
     resources = json.loads(run_uba_api(".resources"))
     return "\n".join([f"- `{r}`" for r in resources["lexiconList"]])
 
-@mcp.resource("resource://references")
-def references() -> str:
-    """UBA Reference Books"""
-    resources = json.loads(run_uba_api(".resources"))
-    return "\n".join([f"- `{r}`" for r in resources["referenceBookList"]])
+@mcp.resource("lexicon://{module}/{entry}")
+def lexicon(module:str, entry:str) -> str:
+    """Lexicon; ; prompt examples: `//lexicon/G25`, `//lexicon/TBESH/G25`, `//lexicon/TBESH/H3478`"""
+    import re
+    command = f"LEXICON:::{module}:::{entry}"
+    content = run_uba_api(command)
+    content = content.replace("\n", "\n- ")
+    content = re.sub("\n.*?More lexicons.*?\n", "\n", content)
+    return content.replace(" [ search ]", "")
 
-@mcp.resource("resource://pdfs")
-def pdfs() -> str:
-    """UBA PDFs"""
-    resources = json.loads(run_uba_api(".resources"))
-    return "\n".join([f"- `{r}`" for r in resources["pdfList"]])
+if DEVELOPER_MODE:
+    @mcp.resource("resource://references")
+    def references() -> str:
+        """Reference Books"""
+        resources = json.loads(run_uba_api(".resources"))
+        return "\n".join([f"- `{r}`" for r in resources["referenceBookList"]])
 
-@mcp.resource("resource://searchtools")
-def searchtools() -> str:
-    """UBA Search Tools"""
-    resources = json.loads(run_uba_api(".resources"))
-    return "\n".join([f"- `{r}`" for r in resources["searchToolList"]])
+    @mcp.resource("resource://pdfs")
+    def pdfs() -> str:
+        """PDFs"""
+        resources = json.loads(run_uba_api(".resources"))
+        return "\n".join([f"- `{r}`" for r in resources["pdfList"]])
+
+    @mcp.resource("resource://searchtools")
+    def searchtools() -> str:
+        """Search Tools"""
+        resources = json.loads(run_uba_api(".resources"))
+        return "\n".join([f"- `{r}`" for r in resources["searchToolList"]])
 
 @mcp.resource("resource://strongs")
 def strongs() -> str:
-    """UBA Strong's Bibles; UBA command example: `BIBLE:::KJVx:::John 3:16`"""
+    """Strong's Bibles; UBA command example: `BIBLE:::KJVx:::John 3:16`"""
     resources = json.loads(run_uba_api(".resources"))
     return "\n".join([f"- `{r}`" for r in resources["strongBibleListAbb"]])
 
-@mcp.resource("resource://thirddicts")
-def thirddicts() -> str:
-    """UBA Third-Party Dictionaries; UBA command examples: `SEARCHTHIRDDICTIONARY:::faith`, `SEARCHTHIRDDICTIONARY:::webster:::faith`"""
-    resources = json.loads(run_uba_api(".resources"))
-    return "\n".join([f"- `{r}`" for r in resources["thirdPartyDictionaryList"]])
+if DEVELOPER_MODE:
+    @mcp.resource("resource://thirddicts")
+    def thirddicts() -> str:
+        """Third-Party Dictionaries; UBA command examples: `SEARCHTHIRDDICTIONARY:::faith`, `SEARCHTHIRDDICTIONARY:::webster:::faith`"""
+        resources = json.loads(run_uba_api(".resources"))
+        return "\n".join([f"- `{r}`" for r in resources["thirdPartyDictionaryList"]])
 
 @mcp.resource("resource://topics")
 def topics() -> dict:
-    """UBA Topical Collections"""
+    """Topical Collections; prompt examples: `//topic/faith`, `//topic/hope`, `//topic/love`"""
     resources = json.loads(run_uba_api(".resources"))
     return dict(zip(resources["topicListAbb"], resources["topicList"]))
+
+collection_db = os.path.join(BIBLEMATEDATA, "collection.db")
+if os.path.exists(collection_db):
+    @mcp.resource("parallel://{query}")
+    def parallel(query:str) -> Union[str, list]:
+        """Bible Parallels; prompt examples: `//parallel/baptism`, `//parallel/light`, `//parallel/sermon`"""
+        from biblemate.uba.search import UBASearches
+        collection_db = os.path.join(BIBLEMATEDATA, "collection.db")
+        return UBASearches.search_data(
+            db_file=collection_db,
+            sql_table="PARALLEL",
+            query=query,
+            top_k=config.max_semantic_matches,
+        )
+    @mcp.resource("promise://{query}")
+    def promise(query:str) -> Union[str, list]:
+        """Bible Promises; prompt examples: `//promise/faith`, `//promise/hope`, `//promise/love`"""
+        from biblemate.uba.search import UBASearches
+        collection_db = os.path.join(BIBLEMATEDATA, "collection.db")
+        return UBASearches.search_data(
+            db_file=collection_db,
+            sql_table="PROMISES",
+            query=query,
+            top_k=config.max_semantic_matches,
+        )
+
+topic_db = os.path.join(BIBLEMATEDATA, "exlb.db")
+if os.path.exists(topic_db):
+    @mcp.resource("topic://{query}")
+    def topic(query:str) -> Union[str, list]:
+        """Topical Studies; prompt examples: `//topic/faith`, `//topic/hope`, `//topic/love`"""
+        from biblemate.uba.search import UBASearches
+        topic_db = os.path.join(BIBLEMATEDATA, "exlb.db")
+        return UBASearches.search_data(
+            db_file=topic_db,
+            sql_table="exlbt",
+            query=query,
+            top_k=config.max_semantic_matches,
+        )
+    @mcp.resource("name://{query}")
+    def name(query:str) -> Union[str, list]:
+        """Bible Names; prompt examples: `//name/Jesus`, `//name/Bethlehem`"""
+        from biblemate.uba.search import UBASearches
+        topic_db = os.path.join(BIBLEMATEDATA, "exlb.db")
+        return UBASearches.search_data(
+            db_file=topic_db,
+            sql_table="exlbn",
+            query=query,
+            top_k=config.max_semantic_matches,
+        )
+    @mcp.resource("character://{query}")
+    def character(query:str) -> Union[str, list]:
+        """Character Studies; prompt examples: `//character/Jesus`, `//character/Samuel`, `//topic/John`"""
+        from biblemate.uba.search import UBASearches
+        topic_db = os.path.join(BIBLEMATEDATA, "exlb.db")
+        return UBASearches.search_data(
+            db_file=topic_db,
+            sql_table="exlbp",
+            query=query,
+            top_k=config.max_semantic_matches,
+        )
+    @mcp.resource("location://{query}")
+    def location(query:str) -> Union[str, list]:
+        """Location Studies; prompt examples: `//location/Jerusalem`, `//location/Bethel`, `//location/Bethlehem`"""
+        from biblemate.uba.search import UBASearches
+        topic_db = os.path.join(BIBLEMATEDATA, "exlb.db")
+        return UBASearches.search_data(
+            db_file=topic_db,
+            sql_table="exlbl",
+            query=query,
+            top_k=config.max_semantic_matches,
+        )
+
+@mcp.resource("search://{module}/{request}")
+def search(module:str, request:str) -> str:
+    """search the whole bible; search string must be given"""
+    global search_bible
+    return search_bible(request=request, module=module, search_request=True)
+
+@mcp.resource("genesis://{module}/{request}")
+def genesis(module:str, request:str) -> str:
+    """search the book of Genesis only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=1, module=module, search_request=True)
+
+@mcp.resource("exodus://{module}/{request}")
+def exodus(module:str, request:str) -> str:
+    """search the book of Exodus only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=2, module=module, search_request=True)
+
+@mcp.resource("leviticus://{module}/{request}")
+def leviticus(module:str, request:str) -> str:
+    """search the book of Leviticus only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=3, module=module, search_request=True)
+
+@mcp.resource("numbers://{module}/{request}")
+def numbers(module:str, request:str) -> str:
+    """search the book of Numbers only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=4, module=module, search_request=True)
+
+@mcp.resource("deuteronomy://{module}/{request}")
+def deuteronomy(module:str, request:str) -> str:
+    """search the book of Deuteronomy only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=5, module=module, search_request=True)
+
+@mcp.resource("joshua://{module}/{request}")
+def joshua(module:str, request:str) -> str:
+    """search the book of Joshua only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=6, module=module, search_request=True)
+
+@mcp.resource("judges://{module}/{request}")
+def judges(module:str, request:str) -> str:
+    """search the book of Judges only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=7, module=module, search_request=True)
+
+@mcp.resource("ruth://{module}/{request}")
+def ruth(module:str, request:str) -> str:
+    """search the book of Ruth only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=8, module=module, search_request=True)
+
+@mcp.resource("samuel1://{module}/{request}")
+def samuel1(module:str, request:str) -> str:
+    """search the book of 1 Samuel only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=9, module=module, search_request=True)
+
+@mcp.resource("samuel2://{module}/{request}")
+def samuel2(module:str, request:str) -> str:
+    """search the book of 2 Samuel only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=10, module=module, search_request=True)
+
+@mcp.resource("kings1://{module}/{request}")
+def kings1(module:str, request:str) -> str:
+    """search the book of 1 Kings only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=11, module=module, search_request=True)
+
+@mcp.resource("kings2://{module}/{request}")
+def kings2(module:str, request:str) -> str:
+    """search the book of 2 Kings only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=12, module=module, search_request=True)
+
+@mcp.resource("chronicles1://{module}/{request}")
+def chronicles1(module:str, request:str) -> str:
+    """search the book of 1 Chronicles only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=13, module=module, search_request=True)
+
+@mcp.resource("chronicles2://{module}/{request}")
+def chronicles2(module:str, request:str) -> str:
+    """search the book of 2 Chronicles only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=14, module=module, search_request=True)
+
+@mcp.resource("ezra://{module}/{request}")
+def ezra(module:str, request:str) -> str:
+    """search the book of Ezra only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=15, module=module, search_request=True)
+
+@mcp.resource("nehemiah://{module}/{request}")
+def nehemiah(module:str, request:str) -> str:
+    """search the book of Nehemiah only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=16, module=module, search_request=True)
+
+@mcp.resource("esther://{module}/{request}")
+def esther(module:str, request:str) -> str:
+    """search the book of Esther only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=17, module=module, search_request=True)
+
+@mcp.resource("job://{module}/{request}")
+def job(module:str, request:str) -> str:
+    """search the book of Job only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=18, module=module, search_request=True)
+
+@mcp.resource("psalms://{module}/{request}")
+def psalms(module:str, request:str) -> str:
+    """search the book of Psalms only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=19, module=module, search_request=True)
+
+@mcp.resource("proverbs://{module}/{request}")
+def proverbs(module:str, request:str) -> str:
+    """search the book of Proverbs only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=20, module=module, search_request=True)
+
+@mcp.resource("ecclesiastes://{module}/{request}")
+def ecclesiastes(module:str, request:str) -> str:
+    """search the book of Ecclesiastes only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=21, module=module, search_request=True)
+
+@mcp.resource("songs://{module}/{request}")
+def songs(module:str, request:str) -> str:
+    """search the book of Song of Songs only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=22, module=module, search_request=True)
+
+@mcp.resource("isaiah://{module}/{request}")
+def isaiah(module:str, request:str) -> str:
+    """search the book of Isaiah only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=23, module=module, search_request=True)
+
+@mcp.resource("jeremiah://{module}/{request}")
+def jeremiah(module:str, request:str) -> str:
+    """search the book of Jeremiah only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=24, module=module, search_request=True)
+
+@mcp.resource("lamentations://{module}/{request}")
+def lamentations(module:str, request:str) -> str:
+    """search the book of Lamentations only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=25, module=module, search_request=True)
+
+@mcp.resource("ezekiel://{module}/{request}")
+def ezekiel(module:str, request:str) -> str:
+    """search the book of Ezekiel only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=26, module=module, search_request=True)
+
+@mcp.resource("daniel://{module}/{request}")
+def daniel(module:str, request:str) -> str:
+    """search the book of Daniel only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=27, module=module, search_request=True)
+
+@mcp.resource("hosea://{module}/{request}")
+def hosea(module:str, request:str) -> str:
+    """search the book of Hosea only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=28, module=module, search_request=True)
+
+@mcp.resource("joel://{module}/{request}")
+def joel(module:str, request:str) -> str:
+    """search the book of Joel only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=29, module=module, search_request=True)
+
+@mcp.resource("amos://{module}/{request}")
+def amos(module:str, request:str) -> str:
+    """search the book of Amos only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=30, module=module, search_request=True)
+
+@mcp.resource("obadiah://{module}/{request}")
+def obadiah(module:str, request:str) -> str:
+    """search the book of Obadiah only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=31, module=module, search_request=True)
+
+@mcp.resource("jonah://{module}/{request}")
+def jonah(module:str, request:str) -> str:
+    """search the book of Jonah only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=32, module=module, search_request=True)
+
+@mcp.resource("micah://{module}/{request}")
+def micah(module:str, request:str) -> str:
+    """search the book of Micah only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=33, module=module, search_request=True)
+
+@mcp.resource("nahum://{module}/{request}")
+def nahum(module:str, request:str) -> str:
+    """search the book of Nahum only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=34, module=module, search_request=True)
+
+@mcp.resource("habakkuk://{module}/{request}")
+def habakkuk(module:str, request:str) -> str:
+    """search the book of Habakkuk only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=35, module=module, search_request=True)
+
+@mcp.resource("zephaniah://{module}/{request}")
+def zephaniah(module:str, request:str) -> str:
+    """search the book of Zephaniah only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=36, module=module, search_request=True)
+
+@mcp.resource("haggai://{module}/{request}")
+def haggai(module:str, request:str) -> str:
+    """search the book of Haggai only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=37, module=module, search_request=True)
+
+@mcp.resource("zechariah://{module}/{request}")
+def zechariah(module:str, request:str) -> str:
+    """search the book of Zechariah only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=38, module=module, search_request=True)
+
+@mcp.resource("malachi://{module}/{request}")
+def malachi(module:str, request:str) -> str:
+    """search the book of Malachi only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=39, module=module, search_request=True)
+
+@mcp.resource("matthew://{module}/{request}")
+def matthew(module:str, request:str) -> str:
+    """search the book of Matthew only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=40, module=module, search_request=True)
+
+@mcp.resource("mark://{module}/{request}")
+def mark(module:str, request:str) -> str:
+    """search the book of Mark only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=41, module=module, search_request=True)
+
+@mcp.resource("luke://{module}/{request}")
+def luke(module:str, request:str) -> str:
+    """search the book of Luke only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=42, module=module, search_request=True)
+
+@mcp.resource("john://{module}/{request}")
+def john(module:str, request:str) -> str:
+    """search the book of John only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=43, module=module, search_request=True)
+
+@mcp.resource("acts://{module}/{request}")
+def acts(module:str, request:str) -> str:
+    """search the book of Acts only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=44, module=module, search_request=True)
+
+@mcp.resource("romans://{module}/{request}")
+def romans(module:str, request:str) -> str:
+    """search the book of Romans only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=45, module=module, search_request=True)
+
+@mcp.resource("corinthians1://{module}/{request}")
+def corinthians1(module:str, request:str) -> str:
+    """search the book of 1 Corinthians only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=46, module=module, search_request=True)
+
+@mcp.resource("corinthians2://{module}/{request}")
+def corinthians2(module:str, request:str) -> str:
+    """search the book of 2 Corinthians only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=47, module=module, search_request=True)
+
+@mcp.resource("galatians://{module}/{request}")
+def galatians(module:str, request:str) -> str:
+    """search the book of Galatians only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=48, module=module, search_request=True)
+
+@mcp.resource("ephesians://{module}/{request}")
+def ephesians(module:str, request:str) -> str:
+    """search the book of Ephesians only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=49, module=module, search_request=True)
+
+@mcp.resource("philippians://{module}/{request}")
+def philippians(module:str, request:str) -> str:
+    """search the book of Philippians only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=50, module=module, search_request=True)
+
+@mcp.resource("colossians://{module}/{request}")
+def colossians(module:str, request:str) -> str:
+    """search the book of Colossians only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=51, module=module, search_request=True)
+
+@mcp.resource("thessalonians1://{module}/{request}")
+def thessalonians1(module:str, request:str) -> str:
+    """search the book of 1 Thessalonians only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=52, module=module, search_request=True)
+
+@mcp.resource("thessalonians2://{module}/{request}")
+def thessalonians2(module:str, request:str) -> str:
+    """search the book of 2 Thessalonians only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=53, module=module, search_request=True)
+
+@mcp.resource("timothy1://{module}/{request}")
+def timothy1(module:str, request:str) -> str:
+    """search the book of 1 Timothy only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=54, module=module, search_request=True)
+
+@mcp.resource("timothy2://{module}/{request}")
+def timothy2(module:str, request:str) -> str:
+    """search the book of 2 Timothy only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=55, module=module, search_request=True)
+
+@mcp.resource("titus://{module}/{request}")
+def titus(module:str, request:str) -> str:
+    """search the book of Titus only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=56, module=module, search_request=True)
+
+@mcp.resource("philemon://{module}/{request}")
+def philemon(module:str, request:str) -> str:
+    """search the book of Philemon only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=57, module=module, search_request=True)
+
+@mcp.resource("hebrews://{module}/{request}")
+def hebrews(module:str, request:str) -> str:
+    """search the book of Hebrews only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=58, module=module, search_request=True)
+
+@mcp.resource("james://{module}/{request}")
+def james(module:str, request:str) -> str:
+    """search the book of James only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=59, module=module, search_request=True)
+
+@mcp.resource("peter1://{module}/{request}")
+def peter1(module:str, request:str) -> str:
+    """search the book of 1 Peter only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=60, module=module, search_request=True)
+
+@mcp.resource("peter2://{module}/{request}")
+def peter2(module:str, request:str) -> str:
+    """search the book of 2 Peter only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=61, module=module, search_request=True)
+
+@mcp.resource("john1://{module}/{request}")
+def john1(module:str, request:str) -> str:
+    """search the book of 1 John only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=62, module=module, search_request=True)
+
+@mcp.resource("john2://{module}/{request}")
+def john2(module:str, request:str) -> str:
+    """search the book of 2 John only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=63, module=module, search_request=True)
+
+@mcp.resource("john3://{module}/{request}")
+def john3(module:str, request:str) -> str:
+    """search the book of 3 John only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=64, module=module, search_request=True)
+
+@mcp.resource("jude://{module}/{request}")
+def jude(module:str, request:str) -> str:
+    """search the book of Jude only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=65, module=module, search_request=True)
+
+@mcp.resource("revelation://{module}/{request}")
+def revelation(module:str, request:str) -> str:
+    """search the book of Revelation only; search string must be given"""
+    global search_bible
+    return search_bible(request=request, book=66, module=module, search_request=True)
 
 @mcp.tool
 def search_the_whole_bible(request:str) -> str:
@@ -557,7 +1081,7 @@ def compare_bible_translations(request:str) -> str:
 
 @mcp.tool
 def retrieve_bible_study_indexes(request:str) -> str:
-    """retrieve smart indexes on studying a particular bible verse; bible verse reference must be given"""
+    """retrieve study reference entries on studying a particular bible verse; bible verse reference must be given"""
     global agentmake, getResponse
     messages = agentmake(request, **{'input_content_plugin': 'uba/every_single_ref', 'tool': 'uba/index'}, **AGENTMAKE_CONFIG)
     return getResponse(messages)
@@ -584,32 +1108,81 @@ def retrieve_hebrew_or_greek_bible_verses(request:str) -> str:
     return getResponse(messages)
 
 @mcp.tool
-def retrieve_english_bible_verses(request:str) -> str:
-    """retrieve English Bible verses; bible verse reference(s) must be given, e.g. John 3:16-17; single or multiple references accepted, e.g. Deut 6:4; Gen 1:26-27"""
-    global agentmake, getResponse
-    messages = agentmake(request, **{'tool': 'uba/net'}, **AGENTMAKE_CONFIG)
-    return getResponse(messages)
+def retrieve_bible_verses(request:str) -> str:
+    """retrieve Bible verses; bible verse reference(s) must be given, e.g. John 3:16-17; single or multiple references accepted, e.g. Deut 6:4; Gen 1:26-27"""
+    from agentmake.plugins.uba.lib.BibleParser import BibleVerseParser
+    refs = BibleVerseParser(False).extractAllReferencesReadable(request)
+    if not refs:
+        return "Please provide a valid Bible reference to complete your request."
+    return run_uba_api(f"BIBLE:::{config.default_bible}:::{refs}")
 
 @mcp.tool
-def retrieve_english_bible_chapter(request:str) -> str:
-    """retrieve a whole English Bible chapter; bible chapter reference must be given, e.g. John 3"""
-    global agentmake, getResponse
-    messages = agentmake(request, **{'tool': 'uba/net_chapter'}, **AGENTMAKE_CONFIG)
-    return getResponse(messages)
+def retrieve_verse_translations(request:str) -> str:
+    """retrieve interlinear Hebrew or Greek, together with both literal and dynamic translations of inidividual bible verses; bible verse; bible verse reference(s) must be given, e.g. John 3:16-17; single or multiple references accepted, e.g. Deut 6:4; Gen 1:26-27"""
+    from agentmake.plugins.uba.lib.BibleParser import BibleVerseParser
+    import re
+    refs = BibleVerseParser(False).extractExhaustiveReferencesReadable(request)
+    if not refs:
+        return "Please provide a valid Bible reference to complete your request."
+    output = ""
+    for ref in refs.split("; "):
+        command = f"TRANSLATION:::{ref}"
+        content = run_uba_api(command)
+        output += content.replace("\n", "\n- ")
+    return output
 
 @mcp.tool
-def retrieve_chinese_bible_verses(request:str) -> str:
-    """retrieve Chinese Bible verses; bible verse reference(s) must be given, e.g. John 3:16-17; single or multiple references accepted, e.g. Deut 6:4; Gen 1:26-27"""
-    global agentmake, getResponse
-    messages = agentmake(request, **{'tool': 'uba/cuv'}, **AGENTMAKE_CONFIG)
-    return getResponse(messages)
+def retrieve_verse_discourse(request:str) -> str:
+    """retrieve discourse analysis of inidividual bible verses; bible verse; bible verse reference(s) must be given, e.g. John 3:16-17; single or multiple references accepted, e.g. Deut 6:4; Gen 1:26-27"""
+    from agentmake.plugins.uba.lib.BibleParser import BibleVerseParser
+    import re
+    refs = BibleVerseParser(False).extractExhaustiveReferencesReadable(request)
+    if not refs:
+        return "Please provide a valid Bible reference to complete your request."
+    output = ""
+    for ref in refs.split("; "):
+        command = f"DISCOURSE:::{ref}"
+        content = run_uba_api(command)
+        output += content.replace("\n", "\n- ")
+    return output
 
 @mcp.tool
-def retrieve_chinese_bible_chapter(request:str) -> str:
-    """retrieve a whole Chinese Bible chapter; bible chapter reference must be given, e.g. John 3"""
-    global agentmake, getResponse
-    messages = agentmake(request, **{'tool': 'uba/cuv_chapter'}, **AGENTMAKE_CONFIG)
-    return getResponse(messages)
+def retrieve_verse_morphology(request:str) -> str:
+    """retrieve parsing and morphology of individual bible verses; bible verse reference(s) must be given, e.g. John 3:16-17; single or multiple references accepted, e.g. Deut 6:4; Gen 1:26-27"""
+    from agentmake.plugins.uba.lib.BibleParser import BibleVerseParser
+    import re
+    refs = BibleVerseParser(False).extractExhaustiveReferencesReadable(request)
+    if not refs:
+        return "Please provide a valid Bible reference to complete your request."
+    output = ""
+    for ref in refs.split("; "):
+        command = f"WORDS:::{ref}"
+        morphology = run_uba_api(command, True)
+        morphology = re.sub('''<[^<>]*?(READWORD|READLEXEME)(:::.*?)'">''', r'\n- [\1\2]\n- ', morphology)
+        morphology = morphology.replace("audiotrack", "")
+        morphology = morphology.replace("<div ", "\n### <div ")
+        morphology = re.sub('''<[^<>]*? G(E[0-9]+?) (H[0-9]+?)"[^<>]*?>([^<>]*?)<[^<>]*?>''', r"\3 [\1] [\2]", morphology)
+        morphology = re.sub('''<[^<>]*? (G[0-9]+?)"[^<>]*?>([^<>]*?)<[^<>]*?>''', r"\2 [\1]", morphology)
+        morphology = morphology.replace("<heb>", "\n- <heb>")
+        morphology = morphology.replace("<grk>", "\n- <grk>")
+        morphology = morphology.replace("<br>", "\n- <br>")
+        morphology = re.sub('<[^<>]*?>', '', morphology)
+        output += "# "+morphology
+    return output
+
+@mcp.tool
+def retrieve_bible_chapter(request:str) -> str:
+    """retrieve a whole Bible chapter; bible chapter reference must be given, e.g. John 3"""
+    from agentmake.plugins.uba.lib.BibleParser import BibleVerseParser
+    import re
+    refs = re.sub("[Cc]hapter ([0-9])", r"\1", request)
+    refs = BibleVerseParser(False).extractAllReferencesReadable(refs)
+    if not refs:
+        return "Please provide a valid Bible reference to complete your request."
+    output = []
+    for ref in refs.split("; "):
+        output.append("# "+re.sub("\n([0-9])", r"\n* \1", run_uba_api(f"CHAPTER:::{config.default_bible}:::{ref}")).replace("\n# ", "\n## "))
+    return "\n\n".join(output)
 
 @mcp.tool
 def read_bible_commentary(request:str) -> str:
@@ -889,13 +1462,6 @@ def write_bible_sermon(request:List[Dict[str, Any]]) -> str:
     """Write a bible sermon based on a bible passage; bible book / chapter / passage / reference(s) must be given"""
     global agentmake, getResponse
     messages = agentmake(request, **{'instruction': 'bible/sermon', 'system': 'auto'}, **AGENTMAKE_CONFIG)
-    return getResponse(messages)
-
-@mcp.tool
-def uba(request:str) -> str:
-    """Execute an UBA command; a valid UBA command must be given; do not use this tool if you are not sure what you are doing"""
-    global agentmake, getResponse
-    messages = agentmake(request, **{'tool': 'uba/cmd'}, **AGENTMAKE_CONFIG)
     return getResponse(messages)
 
 @mcp.prompt

@@ -13,8 +13,7 @@ def bible_csb(messages, **kwargs):
         print("Please provide a valid Bible reference to complete your request.")
         return ""
     command = f"BIBLE:::CSB:::{command}"
-    output = run_uba_api(command)
-    print("- "+re.sub(r"\n\(", "\n- (", output))
+    print(run_uba_api(command))
     
     return ""
 

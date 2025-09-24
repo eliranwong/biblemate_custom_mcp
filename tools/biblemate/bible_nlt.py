@@ -13,8 +13,7 @@ def bible_nlt(messages, **kwargs):
         print("Please provide a valid Bible reference to complete your request.")
         return ""
     command = f"BIBLE:::NLT2015:::{command}"
-    output = run_uba_api(command)
-    print("- "+re.sub(r"\n\(", "\n- (", output))
+    print(run_uba_api(command))
     
     return ""
 
