@@ -1,4 +1,5 @@
 import logging, json, os
+from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp import FastMCP
 from fastmcp.prompts.prompt import PromptMessage, TextContent
 from agentmake import agentmake, DEVELOPER_MODE, readTextFile
@@ -13,7 +14,12 @@ AGENTMAKE_CONFIG["backend"] = config.backend
 # Configure logging before creating the FastMCP server
 logging.basicConfig(format="[%(levelname)s]: %(message)s", level=logging.ERROR)
 
-mcp = FastMCP(name="BibleMate AI")
+verifier = JWTVerifier(
+    public_key=os.getenv("BIBLEMATE_MCP_PUBLIC_KEY"),
+    issuer=os.getenv("BIBLEMATE_MCP_ISSUER"),
+    audience=os.getenv("BIBLEMATE_MCP_AUDIENCE")
+) if os.getenv("BIBLEMATE_MCP_PUBLIC_KEY") else None
+mcp = FastMCP(name="BibleMate AI", auth=verifier)
 
 def getResponse(messages:list) -> str:
     return messages[-1].get("content") if messages and "content" in messages[-1] else "Error!"
@@ -46,6 +52,7 @@ def bibles() -> dict:
 @mcp.resource("bible://{module}/{reference}")
 def bible(module:str, reference:str) -> str:
     """Bible; prompt examples: `//bible/John 3:16-18`, `//bible/KJV/John 3:16-18; Deut 6:4`"""
+    from agentmake.plugins.uba.lib.BibleParser import BibleVerseParser
     reference = BibleVerseParser(False).extractAllReferencesReadable(reference)
     if not reference:
         return "Please provide a valid Bible reference to complete your request."
@@ -1186,10 +1193,20 @@ def retrieve_bible_chapter(request:str) -> str:
 
 @mcp.tool
 def read_bible_commentary(request:str) -> str:
-    """read bible commentary; bible verse reference(s) must be given"""
+    """read bible commentary on individual bible verses; bible verse reference(s) must be given, like , like John 3:16 or John 3:16-18"""
+    from agentmake.plugins.uba.lib.BibleParser import BibleVerseParser
     global agentmake, getResponse
-    messages = agentmake(request, **{'tool': 'uba/ai_comment'}, **AGENTMAKE_CONFIG)
-    return getResponse(messages)
+    refs = BibleVerseParser(False).extractExhaustiveReferencesReadable(request)
+    if not refs:
+        return "Please provide a valid Bible reference to complete your request."
+    output = []
+    for ref in refs.split("; "):
+        default_verse = run_uba_api(f"BIBLE:::{config.default_bible}:::{ref}")
+        interlinear_verse = run_uba_api(f"BIBLE:::OHGBi:::{ref}")
+        prompt = f"""# Write a detailed commentary on the following Bible verse:\n\n## {ref}\n{default_verse}\n\n##Interlinear (Hebrew/Greek with literal translation):\n{interlinear_verse}\n\nCommentary:"""
+        messages = agentmake(prompt, system="biblemate/commentary", **AGENTMAKE_CONFIG)
+        output.append(getResponse(messages))
+    return f"# Commentary - {ref}\n\n"+"\n\n".join(output)
 
 @mcp.tool
 def refine_bible_translation(request:List[Dict[str, Any]]) -> str:
