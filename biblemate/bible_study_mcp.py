@@ -1,4 +1,5 @@
 import logging, json, os
+from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp import FastMCP
 from fastmcp.prompts.prompt import PromptMessage, TextContent
@@ -14,12 +15,24 @@ AGENTMAKE_CONFIG["backend"] = config.backend
 # Configure logging before creating the FastMCP server
 logging.basicConfig(format="[%(levelname)s]: %(message)s", level=logging.ERROR)
 
-verifier = JWTVerifier(
-    public_key=os.getenv("BIBLEMATE_MCP_PUBLIC_KEY"),
+BIBLEMATE_STATIC_TOKEN = os.getenv("BIBLEMATE_STATIC_TOKEN")
+BIBLEMATE_MCP_PUBLIC_KEY = os.getenv("BIBLEMATE_MCP_PUBLIC_KEY")
+
+verifier = verifier = StaticTokenVerifier(
+    tokens={
+        BIBLEMATE_STATIC_TOKEN: {
+            "client_id": "biblemate-ai",
+            "scopes": ["read:data", "write:data", "admin:users"]
+        },
+    },
+    required_scopes=["read:data"]
+) if BIBLEMATE_STATIC_TOKEN else JWTVerifier(
+    public_key=BIBLEMATE_MCP_PUBLIC_KEY,
     issuer=os.getenv("BIBLEMATE_MCP_ISSUER"),
     audience=os.getenv("BIBLEMATE_MCP_AUDIENCE")
-) if os.getenv("BIBLEMATE_MCP_PUBLIC_KEY") else None
-mcp = FastMCP(name="BibleMate AI", auth=verifier, host="0.0.0.0")
+) if BIBLEMATE_MCP_PUBLIC_KEY else None
+
+mcp = FastMCP(name="BibleMate AI", auth=verifier)
 
 def getResponse(messages:list) -> str:
     return messages[-1].get("content") if messages and "content" in messages[-1] else "Error!"
