@@ -18,7 +18,7 @@ logging.basicConfig(format="[%(levelname)s]: %(message)s", level=logging.ERROR)
 BIBLEMATE_STATIC_TOKEN = os.getenv("BIBLEMATE_STATIC_TOKEN")
 BIBLEMATE_MCP_PUBLIC_KEY = os.getenv("BIBLEMATE_MCP_PUBLIC_KEY")
 
-verifier = verifier = StaticTokenVerifier(
+verifier = StaticTokenVerifier(
     tokens={
         BIBLEMATE_STATIC_TOKEN: {
             "client_id": "biblemate-ai",
