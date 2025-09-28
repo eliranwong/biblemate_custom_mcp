@@ -19,7 +19,7 @@ verifier = JWTVerifier(
     issuer=os.getenv("BIBLEMATE_MCP_ISSUER"),
     audience=os.getenv("BIBLEMATE_MCP_AUDIENCE")
 ) if os.getenv("BIBLEMATE_MCP_PUBLIC_KEY") else None
-mcp = FastMCP(name="BibleMate AI", auth=verifier)
+mcp = FastMCP(name="BibleMate AI", auth=verifier, host="0.0.0.0")
 
 def getResponse(messages:list) -> str:
     return messages[-1].get("content") if messages and "content" in messages[-1] else "Error!"
