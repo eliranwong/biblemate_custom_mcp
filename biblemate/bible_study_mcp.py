@@ -69,7 +69,7 @@ def bible(module:str, reference:str) -> str:
     reference = BibleVerseParser(False).extractAllReferencesReadable(reference)
     if not reference:
         return "Please provide a valid Bible reference to complete your request."
-    return run_uba_api(f"BIBLE:::{module}::{reference}")
+    return run_uba_api(f"BIBLE:::{module}:::{reference}")
 
 @mcp.resource("chapter://{module}/{reference}")
 def chapter(module:str, reference:str) -> str:
@@ -94,12 +94,12 @@ def commentaries() -> dict:
 @mcp.resource("commentary://{module}/{reference}")
 def commentary(module:str, reference:str) -> str:
     """Commentary; prompt examples: `//commentary/John 3:16`, `//commentary/CBSC/John 3:16`"""
-    return run_uba_api(f"COMMENTARY:::{module}::{reference}")
+    return run_uba_api(f"COMMENTARY:::{module}:::{reference}")
 
 @mcp.resource("treasury://{reference}")
 def treasury(reference:str) -> str:
     """Treasury of Scripture Knowledge (Enhance); prompt examples: `//treasury/John 3:16`, `//treasury/Deut 6:4`"""
-    return run_uba_api(f"TSKE:::{config.default_bible}::{reference}")
+    return run_uba_api(f"TSKE:::{config.default_bible}:::{reference}")
 
 if DEVELOPER_MODE:
     @mcp.resource("resource://data")
