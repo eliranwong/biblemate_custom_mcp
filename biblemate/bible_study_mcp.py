@@ -69,7 +69,7 @@ def bible(module:str, reference:str) -> str:
     reference = BibleVerseParser(False).extractAllReferencesReadable(reference)
     if not reference:
         return "Please provide a valid Bible reference to complete your request."
-    return run_uba_api(f"BIBLE:::{module}:::{reference}")
+    return f"{reference}\n\n"+run_uba_api(f"BIBLE:::{module}:::{reference}")
 
 @mcp.resource("chapter://{module}/{reference}")
 def chapter(module:str, reference:str) -> str:
@@ -142,7 +142,7 @@ def encyclopedias() -> dict:
     return dict(zip(resources["encyclopediaListAbb"], resources["encyclopediaList"]))
 
 encyclopedia_db = os.path.join(BIBLEMATEDATA, "encyclopedia.db")
-if os.path.exists(encyclopedia_db):
+if os.path.isfile(encyclopedia_db):
     @mcp.resource("encyclopedia://{module}/{query}")
     def encyclopedia(module: str, query:str) -> Union[str, list]:
         """Encyclopedia; prompt examples: `//encyclopedia/Jesus`, `//encyclopedia/ISB/Jesus`"""
@@ -217,7 +217,7 @@ def topics() -> dict:
     return dict(zip(resources["topicListAbb"], resources["topicList"]))
 
 collection_db = os.path.join(BIBLEMATEDATA, "collection.db")
-if os.path.exists(collection_db):
+if os.path.isfile(collection_db):
     @mcp.resource("parallel://{query}")
     def parallel(query:str) -> Union[str, list]:
         """Bible Parallels; prompt examples: `//parallel/baptism`, `//parallel/light`, `//parallel/sermon`"""
@@ -242,7 +242,7 @@ if os.path.exists(collection_db):
         )
 
 topic_db = os.path.join(BIBLEMATEDATA, "exlb.db")
-if os.path.exists(topic_db):
+if os.path.isfile(topic_db):
     @mcp.resource("topic://{query}")
     def topic(query:str) -> Union[str, list]:
         """Topical Studies; prompt examples: `//topic/faith`, `//topic/hope`, `//topic/love`"""
@@ -1201,7 +1201,7 @@ def retrieve_bible_chapter(request:str) -> str:
         return "Please provide a valid Bible reference to complete your request."
     output = []
     for ref in refs.split("; "):
-        output.append("# "+re.sub("\n([0-9])", r"\n* \1", run_uba_api(f"CHAPTER:::{config.default_bible}:::{ref}")).replace("\n# ", "\n## "))
+        output.append(run_uba_api(f"CHAPTER:::{module}:::{ref}"))
     return "\n\n".join(output)
 
 @mcp.tool
