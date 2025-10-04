@@ -1201,7 +1201,7 @@ def retrieve_bible_chapter(request:str) -> str:
         return "Please provide a valid Bible reference to complete your request."
     output = []
     for ref in refs.split("; "):
-        output.append(run_uba_api(f"CHAPTER:::{module}:::{ref}"))
+        output.append(run_uba_api(f"CHAPTER:::{config.default_bible}:::{ref}"))
     return "\n\n".join(output)
 
 @mcp.tool
