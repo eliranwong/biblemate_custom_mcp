@@ -82,7 +82,7 @@ def chapter(module:str, reference:str) -> str:
         return "Please provide a valid Bible reference to complete your request."
     output = []
     for ref in refs.split("; "):
-        output.append("# "+re.sub("\n([0-9])", r"\n* \1", run_uba_api(f"CHAPTER:::{module}:::{ref}")).replace("\n# ", "\n## "))
+        output.append(run_uba_api(f"CHAPTER:::{module}:::{ref}"))
     return "\n\n".join(output)
 
 @mcp.resource("resource://commentaries")
