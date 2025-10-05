@@ -218,9 +218,9 @@ def topics() -> dict:
 
 collection_db = os.path.join(BIBLEMATEDATA, "collection.db")
 if os.path.isfile(collection_db):
-    @mcp.resource("parallel://{query}")
-    def parallel(query:str) -> Union[str, list]:
-        """Bible Parallels; prompt examples: `//parallel/baptism`, `//parallel/light`, `//parallel/sermon`"""
+    @mcp.resource("parallel://{module}/{query}")
+    def parallel(module:str, query:str) -> Union[str, list]:
+        """Bible Parallels; prompt examples: `//parallel/baptism`, `//parallel/NET/light`, `//parallel/KJV/sermon`"""
         from biblemate.uba.search import UBASearches
         collection_db = os.path.join(BIBLEMATEDATA, "collection.db")
         return UBASearches.search_data(
@@ -228,10 +228,11 @@ if os.path.isfile(collection_db):
             sql_table="PARALLEL",
             query=query,
             top_k=config.max_semantic_matches,
+            bible=module,
         )
-    @mcp.resource("promise://{query}")
-    def promise(query:str) -> Union[str, list]:
-        """Bible Promises; prompt examples: `//promise/faith`, `//promise/hope`, `//promise/love`"""
+    @mcp.resource("promise://{module}/{query}")
+    def promise(module:str, query:str) -> Union[str, list]:
+        """Bible Promises; prompt examples: `//promise/faith`, `//promise/NET/hope`, `//promise/KJV/love`"""
         from biblemate.uba.search import UBASearches
         collection_db = os.path.join(BIBLEMATEDATA, "collection.db")
         return UBASearches.search_data(
@@ -239,6 +240,7 @@ if os.path.isfile(collection_db):
             sql_table="PROMISES",
             query=query,
             top_k=config.max_semantic_matches,
+            bible=module,
         )
 
 topic_db = os.path.join(BIBLEMATEDATA, "exlb.db")
