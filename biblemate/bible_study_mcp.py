@@ -6,7 +6,7 @@ from fastmcp.prompts.prompt import PromptMessage, TextContent
 from agentmake import agentmake, DEVELOPER_MODE, readTextFile
 from biblemate import BIBLEMATEDATA, AGENTMAKE_CONFIG, config
 from biblemate.uba.bible import search_bible
-from biblemate.uba.api import run_uba_api
+from biblemate.uba.api import run_uba_api, run_uba_ai_commentary, run_uba_words, run_uba_discourse, run_uba_translation, run_uba_index
 from typing import List, Dict, Any, Union
 
 # configure backend
@@ -96,10 +96,40 @@ def commentary(module:str, reference:str) -> str:
     """Commentary; prompt examples: `//commentary/John 3:16`, `//commentary/CBSC/John 3:16`"""
     return run_uba_api(f"COMMENTARY:::{module}:::{reference}")
 
-@mcp.resource("treasury://{reference}")
-def treasury(reference:str) -> str:
+@mcp.resource("aicommentary://{reference}")
+def aicommentary(reference:str) -> str:
+    """AI Commentary; prompt examples: `//aicommentary/John 3:16`, `//aicommentary/Deut 6:4`"""
+    return run_uba_ai_commentary(reference)
+
+@mcp.resource("translation://{reference}")
+def translation(reference:str) -> str:
+    """Retrieve interlinear, literal and dynamic translations; prompt examples: `//translation/John 3:16`, `//translation/Deut 6:4`"""
+    return run_uba_translation(reference)
+
+@mcp.resource("discourse://{reference}")
+def discourse(reference:str) -> str:
+    """Retrieve discourse analysis of bible verses; prompt examples: `//discourse/John 3:16`, `//discourse/Deut 6:4`"""
+    return run_uba_discourse(reference)
+
+@mcp.resource("morphology://{reference}")
+def morphology(reference:str) -> str:
+    """Retrieve morphology data of bible verses; prompt examples: `//morphology/John 3:16`, `//morphology/Deut 6:4`"""
+    return run_uba_words(reference)
+
+@mcp.resource("index://{reference}")
+def index(reference:str) -> str:
+    """Retrieve bible verse study indexes; prompt examples: `//morphology/John 3:16`, `//morphology/Deut 6:4`"""
+    return run_uba_index(reference)
+
+@mcp.resource("xref://{module}/{reference}")
+def xref(module:str, reference:str) -> str:
+    """Cross-Reference; prompt examples: `//xref/John 3:16`, `//xref/Deut 6:4`"""
+    return run_uba_api(f"CROSSREFERENCE:::{module}:::{reference}")
+
+@mcp.resource("treasury://{module}/{reference}")
+def treasury(module:str, reference:str) -> str:
     """Treasury of Scripture Knowledge (Enhance); prompt examples: `//treasury/John 3:16`, `//treasury/Deut 6:4`"""
-    return run_uba_api(f"TSKE:::{config.default_bible}:::{reference}")
+    return run_uba_api(f"TSKE:::{module}:::{reference}")
 
 if DEVELOPER_MODE:
     @mcp.resource("resource://data")
@@ -1103,10 +1133,8 @@ def compare_bible_translations(request:str) -> str:
 
 @mcp.tool
 def retrieve_bible_study_indexes(request:str) -> str:
-    """retrieve study reference entries on studying a particular bible verse; bible verse reference must be given"""
-    global agentmake, getResponse
-    messages = agentmake(request, **{'input_content_plugin': 'uba/every_single_ref', 'tool': 'uba/index'}, **AGENTMAKE_CONFIG)
-    return getResponse(messages)
+    """retrieve study indexes on studying a particular bible verse; bible verse reference must be given"""
+    return run_uba_index(request)
 
 @mcp.tool
 def retrieve_bible_cross_references(request:str) -> str:
@@ -1141,56 +1169,18 @@ def retrieve_bible_verses(request:str) -> str:
 @mcp.tool
 def retrieve_verse_translations(request:str) -> str:
     """retrieve interlinear Hebrew or Greek, together with both literal and dynamic translations of inidividual bible verses; bible verse; bible verse reference(s) must be given, e.g. John 3:16-17; single or multiple references accepted, e.g. Deut 6:4; Gen 1:26-27"""
-    from agentmake.plugins.uba.lib.BibleParser import BibleVerseParser
-    import re
-    refs = BibleVerseParser(False).extractExhaustiveReferencesReadable(request)
-    if not refs:
-        return "Please provide a valid Bible reference to complete your request."
-    output = ""
-    for ref in refs.split("; "):
-        command = f"TRANSLATION:::{ref}"
-        content = run_uba_api(command)
-        output += content.replace("\n", "\n- ")
-    return output
+    return run_uba_translation(request)
 
 @mcp.tool
 def retrieve_verse_discourse(request:str) -> str:
     """retrieve discourse analysis of inidividual bible verses; bible verse; bible verse reference(s) must be given, e.g. John 3:16-17; single or multiple references accepted, e.g. Deut 6:4; Gen 1:26-27"""
-    from agentmake.plugins.uba.lib.BibleParser import BibleVerseParser
-    import re
-    refs = BibleVerseParser(False).extractExhaustiveReferencesReadable(request)
-    if not refs:
-        return "Please provide a valid Bible reference to complete your request."
-    output = ""
-    for ref in refs.split("; "):
-        command = f"DISCOURSE:::{ref}"
-        content = run_uba_api(command)
-        output += content.replace("\n", "\n- ")
-    return output
+    return run_uba_discourse(request)
+
 
 @mcp.tool
 def retrieve_verse_morphology(request:str) -> str:
     """retrieve parsing and morphology of individual bible verses; bible verse reference(s) must be given, e.g. John 3:16-17; single or multiple references accepted, e.g. Deut 6:4; Gen 1:26-27"""
-    from agentmake.plugins.uba.lib.BibleParser import BibleVerseParser
-    import re
-    refs = BibleVerseParser(False).extractExhaustiveReferencesReadable(request)
-    if not refs:
-        return "Please provide a valid Bible reference to complete your request."
-    output = ""
-    for ref in refs.split("; "):
-        command = f"WORDS:::{ref}"
-        morphology = run_uba_api(command, True)
-        morphology = re.sub('''<[^<>]*?(READWORD|READLEXEME)(:::.*?)'">''', r'\n- [\1\2]\n- ', morphology)
-        morphology = morphology.replace("audiotrack", "")
-        morphology = morphology.replace("<div ", "\n### <div ")
-        morphology = re.sub('''<[^<>]*? G(E[0-9]+?) (H[0-9]+?)"[^<>]*?>([^<>]*?)<[^<>]*?>''', r"\3 [\1] [\2]", morphology)
-        morphology = re.sub('''<[^<>]*? (G[0-9]+?)"[^<>]*?>([^<>]*?)<[^<>]*?>''', r"\2 [\1]", morphology)
-        morphology = morphology.replace("<heb>", "\n- <heb>")
-        morphology = morphology.replace("<grk>", "\n- <grk>")
-        morphology = morphology.replace("<br>", "\n- <br>")
-        morphology = re.sub('<[^<>]*?>', '', morphology)
-        output += "# "+morphology
-    return output
+    return run_uba_words(request)
 
 @mcp.tool
 def retrieve_bible_chapter(request:str) -> str:
@@ -1209,19 +1199,7 @@ def retrieve_bible_chapter(request:str) -> str:
 @mcp.tool
 def read_bible_commentary(request:str) -> str:
     """read bible commentary on individual bible verses; bible verse reference(s) must be given, like , like John 3:16 or John 3:16-18"""
-    from agentmake.plugins.uba.lib.BibleParser import BibleVerseParser
-    global agentmake, getResponse
-    refs = BibleVerseParser(False).extractExhaustiveReferencesReadable(request)
-    if not refs:
-        return "Please provide a valid Bible reference to complete your request."
-    output = []
-    for ref in refs.split("; "):
-        default_verse = run_uba_api(f"BIBLE:::{config.default_bible}:::{ref}")
-        interlinear_verse = run_uba_api(f"BIBLE:::OHGBi:::{ref}")
-        prompt = f"""# Write a detailed commentary on the following Bible verse:\n\n## {ref}\n{default_verse}\n\n##Interlinear (Hebrew/Greek with literal translation):\n{interlinear_verse}\n\nCommentary:"""
-        messages = agentmake(prompt, system="biblemate/commentary", **AGENTMAKE_CONFIG)
-        output.append(getResponse(messages))
-    return f"# Commentary - {ref}\n\n"+"\n\n".join(output)
+    return run_uba_ai_commentary(request)
 
 @mcp.tool
 def refine_bible_translation(request:List[Dict[str, Any]]) -> str:
