@@ -1373,7 +1373,7 @@ def write_bible_chapter_summary(request:List[Dict[str, Any]]) -> str:
 def write_bible_perspectives(request:List[Dict[str, Any]]) -> str:
     """Write biblical perspectives and principles in relation to the user content"""
     global agentmake, getResponse
-    messages = agentmake(request, **{'instruction': 'bible/perspective', 'system': 'auto'}, **AGENTMAKE_CONFIG)
+    messages = agentmake(request, **{'system': 'bible/perspective'}, **AGENTMAKE_CONFIG)
     return getResponse(messages)
 
 @mcp.tool
