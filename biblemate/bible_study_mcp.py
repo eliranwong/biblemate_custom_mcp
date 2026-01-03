@@ -5,16 +5,18 @@ from fastmcp import FastMCP
 from fastmcp.prompts.prompt import PromptMessage, TextContent
 from agentmake import agentmake, DEVELOPER_MODE
 from agentmake.plugins.uba.lib.BibleParser import BibleVerseParser
-from biblemate import BIBLEMATE_VERSION, BIBLEMATEDATA, AGENTMAKE_CONFIG, config
-from biblemate.uba.bible import search_bible
-from biblemate.uba.api import run_uba_api, run_uba_ai_commentary, run_uba_words, run_uba_discourse, run_uba_translation, run_uba_index
-from biblemate.uba.search import UBASearches
+from biblemate import BIBLEMATE_VERSION, BIBLEMATEVECTORSTORE, AGENTMAKE_CONFIG, config
+from biblemate.api.bible import search_bible
+from biblemate.api.api import run_bm_api
+from biblemate.api.search import UBASearches
 from typing import List, Dict, Any, Union
 
 THIS_BACKEND = config.backend if hasattr(config, "backend") else os.getenv("DEFAULT_AI_BACKEND") if os.getenv("DEFAULT_AI_BACKEND") else "googleai"
+THIS_MODEL = config.model if hasattr(config, "model") else os.getenv("DEFAULT_AI_MODEL") if os.getenv("DEFAULT_AI_MODEL") else "gemini-2.5-flash"
 
 # configure backend
 AGENTMAKE_CONFIG["backend"] = THIS_BACKEND
+AGENTMAKE_CONFIG["model"] = THIS_MODEL
 
 # Configure logging before creating the FastMCP server
 logging.basicConfig(format="[%(levelname)s]: %(message)s", level=logging.ERROR)
@@ -41,6 +43,9 @@ mcp = FastMCP(name="BibleMate AI", auth=verifier)
 def getResponse(messages:list) -> str:
     return messages[-1].get("content") if messages and "content" in messages[-1] else "Error!"
 
+def chapter2verses(request:str) -> str:
+    return re.sub("[Cc][Hh][Aa][Pp][Tt][Ee][Rr] ([0-9]+?)([^0-9])", r"\1:1-180\2", request)
+
 # Note: Declare global variables used in MCP resources, tools or prompts, so that they work when MCP is run in http transport mode
 
 @mcp.resource("resource://info")
@@ -52,120 +57,84 @@ def info() -> str:
     info += f"\n\nAI Backend: {THIS_BACKEND}"
     return info
 
-@mcp.resource("uba://{command}")
+@mcp.resource("bm://{command}")
 def uba(command:str) -> str:
-    """Execute an UBA command; a valid UBA command must be given, e.g. `//uba/John 3:16`; do not use this prompt if you are not sure what you are doing"""
-    global run_uba_api
-    return run_uba_api(command)
+    """Execute an BibleMate command; a valid BibleMate command must be given, e.g. `//bm/John 3:16`; do not use this prompt if you are not sure what you are doing"""
+    global run_bm_api
+    return run_bm_api(command)
 
 if DEVELOPER_MODE:
     @mcp.resource("resource://audio")
     def audio() -> str:
         """Bible Audio"""
-        global run_uba_api, json
-        resources = json.loads(run_uba_api(".resources"))
+        global run_bm_api, json
+        resources = json.loads(run_bm_api(".resources"))
         return "\n".join([f"- `{r}`" for r in resources["bibleAudioModules"]])
 
 @mcp.resource("resource://bibles")
 def bibles() -> dict:
     """Bibles; prompt examples: `//bible/John 3:16-18`, `//bible/KJV/John 3:16-18; Deut 6:4`"""
-    global run_uba_api, json
-    resources = json.loads(run_uba_api(".resources"))
+    global run_bm_api, json
+    resources = json.loads(run_bm_api(".resources"))
     return dict(zip(resources["bibleListAbb"], resources["bibleList"]))
 
 @mcp.resource("bible://{module}/{reference}")
 def bible(module:str, reference:str) -> str:
     """Bible; prompt examples: `//bible/John 3:16-18`, `//bible/KJV/John 3:16-18; Deut 6:4`"""
-    global BibleVerseParser, run_uba_api
-    reference = BibleVerseParser(False).extractAllReferencesReadable(reference)
-    if not reference:
-        return "Please provide a valid Bible reference to complete your request."
-    return f"{reference}\n\n"+run_uba_api(f"BIBLE:::{module}:::{reference}")
+    global run_bm_api
+    return run_bm_api(f"verses:::{module}:::{reference}")
 
 @mcp.resource("chapter://{module}/{reference}")
 def chapter(module:str, reference:str) -> str:
     """retrieve a whole Bible chapter; bible chapter reference must be given, e.g. John 3"""
-    global BibleVerseParser, run_uba_api, re
-    refs = re.sub("[Cc]hapter ([0-9])", r"\1", reference)
-    refs = BibleVerseParser(False).extractAllReferencesReadable(refs)
-    if not refs:
-        return "Please provide a valid Bible reference to complete your request."
-    output = []
-    for ref in refs.split("; "):
-        output.append(run_uba_api(f"CHAPTER:::{module}:::{ref}"))
-    return "\n\n".join(output)
+    global run_bm_api
+    return run_bm_api(f"chapter:::{module}:::{reference}")
 
 @mcp.resource("resource://commentaries")
 def commentaries() -> dict:
     """Commentaries; prompt examples: `//commentary/John 3:16`, `//commentary/CBSC/John 3:16`"""
-    global run_uba_api, json
-    resources = json.loads(run_uba_api(".resources"))
+    global run_bm_api, json
+    resources = json.loads(run_bm_api(".resources"))
     return dict(zip(resources["commentaryListAbb"], resources["commentaryList"]))
 
 @mcp.resource("commentary://{module}/{reference}")
 def commentary(module:str, reference:str) -> str:
     """Commentary; prompt examples: `//commentary/John 3:16`, `//commentary/CBSC/John 3:16`"""
-    global run_uba_api
-    return run_uba_api(f"COMMENTARY:::{module}:::{reference}")
+    global run_bm_api
+    return run_bm_api(f"commentary:::{module}:::{reference}")
 
 @mcp.resource("aicommentary://{reference}")
 def aicommentary(reference:str) -> str:
     """AI Commentary; prompt examples: `//aicommentary/John 3:16`, `//aicommentary/Deut 6:4`"""
-    global run_uba_ai_commentary
-    return run_uba_ai_commentary(reference)
-
-@mcp.resource("translation://{reference}")
-def translation(reference:str) -> str:
-    """Retrieve interlinear, literal and dynamic translations; prompt examples: `//translation/John 3:16`, `//translation/Deut 6:4`"""
-    global run_uba_translation
-    return run_uba_translation(reference)
-
-@mcp.resource("discourse://{reference}")
-def discourse(reference:str) -> str:
-    """Retrieve discourse analysis of bible verses; prompt examples: `//discourse/John 3:16`, `//discourse/Deut 6:4`"""
-    global run_uba_discourse
-    return run_uba_discourse(reference)
+    global run_bm_api
+    return run_bm_api(f"commentary:::{reference}")
 
 @mcp.resource("morphology://{reference}")
 def morphology(reference:str) -> str:
     """Retrieve morphology data of bible verses; prompt examples: `//morphology/John 3:16`, `//morphology/Deut 6:4`"""
-    global run_uba_words
-    return run_uba_words(reference)
-
-@mcp.resource("index://{reference}")
-def index(reference:str) -> str:
-    """Retrieve bible verse study indexes; prompt examples: `//morphology/John 3:16`, `//morphology/Deut 6:4`"""
-    global run_uba_index
-    return run_uba_index(reference)
+    global run_bm_api
+    return run_bm_api(f"morphology:::{reference}")
 
 @mcp.resource("xref://{module}/{reference}")
 def xref(module:str, reference:str) -> str:
     """Cross-Reference; prompt examples: `//xref/John 3:16`, `//xref/Deut 6:4`"""
-    global run_uba_api
-    return run_uba_api(f"CROSSREFERENCE:::{module}:::{reference}")
+    global run_bm_api
+    return run_bm_api(f"xrefs:::{module}:::{reference}")
 
 @mcp.resource("treasury://{module}/{reference}")
 def treasury(module:str, reference:str) -> str:
     """Treasury of Scripture Knowledge (Enhance); prompt examples: `//treasury/John 3:16`, `//treasury/Deut 6:4`"""
-    global run_uba_api
-    return run_uba_api(f"TSKE:::{module}:::{reference}")
-
-if DEVELOPER_MODE:
-    @mcp.resource("resource://data")
-    def data() -> str:
-        """Data; UBA command example: `DATA:::Bible Chronology`"""
-        global run_uba_api, json
-        resources = json.loads(run_uba_api(".resources"))
-        return "\n".join([f"- `{r}`" for r in resources["dataList"]])
+    global run_bm_api
+    return run_bm_api(f"treasury:::{module}:::{reference}")
 
 @mcp.resource("resource://dictionaries")
 def dictionaries() -> dict:
     """Dictionaries; prompt examples: `//dictionary/Jesus`, `//dictionary/Israel`"""
-    global run_uba_api, json
-    resources = json.loads(run_uba_api(".resources"))
+    global run_bm_api, json
+    resources = json.loads(run_bm_api(".resources"))
     return dict(zip(resources["dictionaryListAbb"], resources["dictionaryList"]))
 
-dictionary_db = os.path.join(BIBLEMATEDATA, "dictionary.db")
+dictionary_db = os.path.join(BIBLEMATEVECTORSTORE, "dictionary.db")
 if os.path.isfile(dictionary_db):
     @mcp.resource("dictionary://{query}")
     def dictionary(query:str) -> Union[str, list]:
@@ -179,22 +148,14 @@ if os.path.isfile(dictionary_db):
             top_k=config.max_semantic_matches,
         )
 
-if DEVELOPER_MODE:
-    @mcp.resource("resource://docs")
-    def docs() -> str:
-        """Documents"""
-        global run_uba_api, json
-        resources = json.loads(run_uba_api(".resources"))
-        return "\n".join([f"- `{r}`" for r in resources["docxList"]])
-
 @mcp.resource("resource://encyclopedias")
 def encyclopedias() -> dict:
     """Encyclopedias; prompt examples: `//encyclopedia/Jesus`, `//encyclopedia/ISB/Jesus`"""
-    global run_uba_api, json
-    resources = json.loads(run_uba_api(".resources"))
+    global run_bm_api, json
+    resources = json.loads(run_bm_api(".resources"))
     return dict(zip(resources["encyclopediaListAbb"], resources["encyclopediaList"]))
 
-encyclopedia_db = os.path.join(BIBLEMATEDATA, "encyclopedia.db")
+encyclopedia_db = os.path.join(BIBLEMATEVECTORSTORE, "encyclopedia.db")
 if os.path.isfile(encyclopedia_db):
     @mcp.resource("encyclopedia://{module}/{query}")
     def encyclopedia(module: str, query:str) -> Union[str, list]:
@@ -207,76 +168,42 @@ if os.path.isfile(encyclopedia_db):
             top_k=config.max_semantic_matches,
         )
 
-if DEVELOPER_MODE:
-    @mcp.resource("resource://epubs")
-    def epubs() -> str:
-        """EPUBs"""
-        global run_uba_api, json
-        resources = json.loads(run_uba_api(".resources"))
-        return "\n".join([f"- `{r}`" for r in resources["epubList"]])
-
 @mcp.resource("resource://lexicons")
 def lexicons() -> str:
     """Lexicons; prompt examples: `//lexicon/G25`, `//lexicon/TBESH/G25`, `//lexicon/TBESH/H3478`"""
-    global run_uba_api, json
-    resources = json.loads(run_uba_api(".resources"))
+    global run_bm_api, json
+    resources = json.loads(run_bm_api(".resources"))
     return "\n".join([f"- `{r}`" for r in resources["lexiconList"]])
 
 @mcp.resource("lexicon://{module}/{entry}")
 def lexicon(module:str, entry:str) -> str:
     """Lexicon; ; prompt examples: `//lexicon/G25`, `//lexicon/TBESH/G25`, `//lexicon/TBESH/H3478`"""
-    global run_uba_api, re
-    command = f"LEXICON:::{module}:::{entry}"
-    content = run_uba_api(command)
-    content = content.replace("\n", "\n- ")
-    content = re.sub("\n.*?More lexicons.*?\n", "\n", content)
-    return content.replace(" [ search ]", "")
-
-if DEVELOPER_MODE:
-    @mcp.resource("resource://references")
-    def references() -> str:
-        """Reference Books"""
-        global run_uba_api, json
-        resources = json.loads(run_uba_api(".resources"))
-        return "\n".join([f"- `{r}`" for r in resources["referenceBookList"]])
-
-    @mcp.resource("resource://pdfs")
-    def pdfs() -> str:
-        """PDFs"""
-        global run_uba_api, json
-        resources = json.loads(run_uba_api(".resources"))
-        return "\n".join([f"- `{r}`" for r in resources["pdfList"]])
-
-    @mcp.resource("resource://searchtools")
-    def searchtools() -> str:
-        """Search Tools"""
-        global run_uba_api, json
-        resources = json.loads(run_uba_api(".resources"))
-        return "\n".join([f"- `{r}`" for r in resources["searchToolList"]])
+    global run_bm_api
+    return run_bm_api(f"lexicons:::{module}:::{entry}")
 
 @mcp.resource("resource://strongs")
 def strongs() -> str:
     """Strong's Bibles; UBA command example: `BIBLE:::KJVx:::John 3:16`"""
-    global run_uba_api, json
-    resources = json.loads(run_uba_api(".resources"))
+    global run_bm_api, json
+    resources = json.loads(run_bm_api(".resources"))
     return "\n".join([f"- `{r}`" for r in resources["strongBibleListAbb"]])
 
 if DEVELOPER_MODE:
     @mcp.resource("resource://thirddicts")
     def thirddicts() -> str:
         """Third-Party Dictionaries; UBA command examples: `SEARCHTHIRDDICTIONARY:::faith`, `SEARCHTHIRDDICTIONARY:::webster:::faith`"""
-        global run_uba_api, json
-        resources = json.loads(run_uba_api(".resources"))
+        global run_bm_api, json
+        resources = json.loads(run_bm_api(".resources"))
         return "\n".join([f"- `{r}`" for r in resources["thirdPartyDictionaryList"]])
 
 @mcp.resource("resource://topics")
 def topics() -> dict:
     """Topical Collections; prompt examples: `//topic/faith`, `//topic/hope`, `//topic/love`"""
-    global run_uba_api, json
-    resources = json.loads(run_uba_api(".resources"))
+    global run_bm_api, json
+    resources = json.loads(run_bm_api(".resources"))
     return dict(zip(resources["topicListAbb"], resources["topicList"]))
 
-collection_db = os.path.join(BIBLEMATEDATA, "collection.db")
+collection_db = os.path.join(BIBLEMATEVECTORSTORE, "collection.db")
 if os.path.isfile(collection_db):
     @mcp.resource("parallel://{module}/{query}")
     def parallel(module:str, query:str) -> Union[str, list]:
@@ -301,7 +228,7 @@ if os.path.isfile(collection_db):
             bible=module,
         )
 
-topic_db = os.path.join(BIBLEMATEDATA, "exlb.db")
+topic_db = os.path.join(BIBLEMATEVECTORSTORE, "exlb.db")
 if os.path.isfile(topic_db):
     @mcp.resource("topic://{query}")
     def topic(query:str) -> Union[str, list]:
@@ -1151,82 +1078,58 @@ def search_revelation_only(request:str) -> str:
 @mcp.tool
 def compare_bible_translations(request:str) -> str:
     """compare Bible translations; bible verse reference(s) must be given"""
-    global agentmake, getResponse, AGENTMAKE_CONFIG
-    messages = agentmake(request, **{'input_content_plugin': 'uba/every_single_ref', 'tool': 'uba/compare'}, **AGENTMAKE_CONFIG)
-    return getResponse(messages)
-
-@mcp.tool
-def retrieve_bible_study_indexes(request:str) -> str:
-    """retrieve study indexes on studying a particular bible verse; bible verse reference must be given"""
-    return run_uba_index(request)
+    global run_bm_api, chapter2verses
+    request = chapter2verses(request)
+    return run_bm_api(f"verses:::KJV,LEB,NET,OHGB,OHGBi:::{request}")
 
 @mcp.tool
 def retrieve_bible_cross_references(request:str) -> str:
     """retrieve cross-references of Bible verses; bible verse reference(s) must be given"""
-    global agentmake, getResponse, AGENTMAKE_CONFIG
-    messages = agentmake(request, **{'input_content_plugin': 'uba/every_single_ref', 'tool': 'uba/xref'}, **AGENTMAKE_CONFIG)
-    return getResponse(messages)
-
-@mcp.tool
-def retrieve_pointed_hebrew_or_accented_greek_bible_verses(request:str) -> str:
-    """retrieve Hebrew (with pointed vowels) or Greek (with accents) Bible verses; bible verse reference(s) must be given, e.g. John 3:16-17; single or multiple references accepted, e.g. Deut 6:4; Gen 1:26-27"""
-    global agentmake, getResponse, AGENTMAKE_CONFIG
-    messages = agentmake(request, **{'tool': 'uba/ohgb'}, **AGENTMAKE_CONFIG)
-    return getResponse(messages)
+    global run_bm_api, chapter2verses
+    request = chapter2verses(request)
+    return run_bm_api(f"xrefs:::{request}")
 
 @mcp.tool
 def retrieve_hebrew_or_greek_bible_verses(request:str) -> str:
-    """retrieve Hebrew (without pointed vowels) or Greek (without accents) Bible verses; bible verse reference(s) must be given, e.g. John 3:16-17; single or multiple references accepted, e.g. Deut 6:4; Gen 1:26-27"""
-    global agentmake, getResponse, AGENTMAKE_CONFIG
-    messages = agentmake(request, **{'tool': 'uba/mob'}, **AGENTMAKE_CONFIG)
-    return getResponse(messages)
+    """retrieve Hebrew or Greek Bible verses; bible verse reference(s) must be given, e.g. John 3:16-17; single or multiple references accepted, e.g. Deut 6:4; Gen 1:26-27"""
+    global run_bm_api, chapter2verses
+    request = chapter2verses(request)
+    return run_bm_api(f"verses:::OHGB:::{request}")
+
+@mcp.tool
+def retrieve_interlinear_hebrew_or_greek_bible_verses(request:str) -> str:
+    """retrieve interlinear Hebrew-English or Greek-English Bible verses; bible verse reference(s) must be given, e.g. John 3:16-17; single or multiple references accepted, e.g. Deut 6:4; Gen 1:26-27"""
+    global run_bm_api, chapter2verses
+    request = chapter2verses(request)
+    return run_bm_api(f"verses:::OHGBi:::{request}")
 
 @mcp.tool
 def retrieve_bible_verses(request:str) -> str:
     """retrieve Bible verses; bible verse reference(s) must be given, e.g. John 3:16-17; single or multiple references accepted, e.g. Deut 6:4; Gen 1:26-27"""
-    global BibleVerseParser, run_uba_api
-    refs = BibleVerseParser(False).extractAllReferencesReadable(request)
-    if not refs:
-        return "Please provide a valid Bible reference to complete your request."
-    return run_uba_api(f"BIBLE:::{config.default_bible}:::{refs}")
-
-@mcp.tool
-def retrieve_verse_translations(request:str) -> str:
-    """retrieve interlinear Hebrew or Greek, together with both literal and dynamic translations of inidividual bible verses; bible verse; bible verse reference(s) must be given, e.g. John 3:16-17; single or multiple references accepted, e.g. Deut 6:4; Gen 1:26-27"""
-    global run_uba_translation
-    return run_uba_translation(request)
-
-@mcp.tool
-def retrieve_verse_discourse(request:str) -> str:
-    """retrieve discourse analysis of inidividual bible verses; bible verse; bible verse reference(s) must be given, e.g. John 3:16-17; single or multiple references accepted, e.g. Deut 6:4; Gen 1:26-27"""
-    global run_uba_discourse
-    return run_uba_discourse(request)
-
+    global run_bm_api, chapter2verses
+    request = chapter2verses(request)
+    return run_bm_api(f"verses:::{config.default_bible}:::{request}")
 
 @mcp.tool
 def retrieve_verse_morphology(request:str) -> str:
     """retrieve parsing and morphology of individual bible verses; bible verse reference(s) must be given, e.g. John 3:16-17; single or multiple references accepted, e.g. Deut 6:4; Gen 1:26-27"""
-    global run_uba_words
-    return run_uba_words(request)
+    global run_bm_api, chapter2verses
+    request = chapter2verses(request)
+    return run_bm_api(f"morphology:::{request}")
 
 @mcp.tool
 def retrieve_bible_chapter(request:str) -> str:
     """retrieve a whole Bible chapter; bible chapter reference must be given, e.g. John 3"""
-    global BibleVerseParser, run_uba_api, re
-    refs = re.sub("[Cc]hapter ([0-9])", r"\1", request)
-    refs = BibleVerseParser(False).extractAllReferencesReadable(refs)
-    if not refs:
-        return "Please provide a valid Bible reference to complete your request."
-    output = []
-    for ref in refs.split("; "):
-        output.append(run_uba_api(f"CHAPTER:::{config.default_bible}:::{ref}"))
-    return "\n\n".join(output)
+    global run_bm_api, chapter2verses
+    request = chapter2verses(request)
+    return run_bm_api(f"chapter:::{request}")
 
 @mcp.tool
 def read_bible_commentary(request:str) -> str:
     """read bible commentary on individual bible verses; bible verse reference(s) must be given, like , like John 3:16 or John 3:16-18"""
-    global run_uba_ai_commentary
-    return run_uba_ai_commentary(request)
+    global run_bm_api, chapter2verses
+    request = chapter2verses(request)
+    return run_bm_api(f"commentary:::{request}")
 
 @mcp.tool
 def refine_bible_translation(request:List[Dict[str, Any]]) -> str:
@@ -1506,7 +1409,7 @@ def simple_bible_study(request:str) -> PromptMessage:
     """Perform a simple bible study task"""
     global PromptMessage, TextContent
     prompt_text = f"""You are a bible study agent. You check the user request, under the `User Request` section, and resolve it with the following steps in order:
-1. Call tool 'retrieve_english_bible_verses' for Bible text, 
+1. Call tool 'retrieve_bible_verses' or `retrieve_bible_chapter` for Bible text, 
 2. Call tool 'retrieve_bible_cross_references' for Bible cross-references, 
 3. Call tool 'study_old_testament_themes' for studying old testament themes or 'study_new_testament_themes' for studying new testament themes, and 
 4. Call tool 'write_bible_theology' to explain its theology.
@@ -1546,44 +1449,37 @@ Ensure each step is clearly addressed and the final output is cohesive and inspi
 @mcp.tool
 def retrieve_niv_bible_verses(request:str) -> str:
     """retrieve NIV Bible verses; bible verse reference(s) must be given, e.g. John 3:16-17; single or multiple references accepted, e.g. Deut 6:4; Gen 1:26-27"""
-    global agentmake, getResponse, AGENTMAKE_CONFIG
-    messages = agentmake(request, **{'tool': 'biblemate/bible_niv'}, **AGENTMAKE_CONFIG)
-    return getResponse(messages)
+    global run_bm_api, chapter2verses
+    request = chapter2verses(request)
+    return run_bm_api(f"verses:::NIV:::{request}")
 
 @mcp.tool
 def retrieve_esv_bible_verses(request:str) -> str:
     """retrieve ESV Bible verses; bible verse reference(s) must be given, e.g. John 3:16-17; single or multiple references accepted, e.g. Deut 6:4; Gen 1:26-27"""
-    global agentmake, getResponse, AGENTMAKE_CONFIG
-    messages = agentmake(request, **{'tool': 'biblemate/bible_esv'}, **AGENTMAKE_CONFIG)
-    return getResponse(messages)
+    global run_bm_api, chapter2verses
+    request = chapter2verses(request)
+    return run_bm_api(f"verses:::ESVGSB:::{request}")
 
 @mcp.tool
 def retrieve_csb_bible_verses(request:str) -> str:
     """retrieve CSB Bible verses; bible verse reference(s) must be given, e.g. John 3:16-17; single or multiple references accepted, e.g. Deut 6:4; Gen 1:26-27"""
-    global agentmake, getResponse, AGENTMAKE_CONFIG
-    messages = agentmake(request, **{'tool': 'biblemate/bible_csb'}, **AGENTMAKE_CONFIG)
-    return getResponse(messages)
+    global run_bm_api, chapter2verses
+    request = chapter2verses(request)
+    return run_bm_api(f"verses:::CSB:::{request}")
 
 @mcp.tool
 def retrieve_nlt_bible_verses(request:str) -> str:
     """retrieve NLT Bible verses; bible verse reference(s) must be given, e.g. John 3:16-17; single or multiple references accepted, e.g. Deut 6:4; Gen 1:26-27"""
-    global agentmake, getResponse, AGENTMAKE_CONFIG
-    messages = agentmake(request, **{'tool': 'biblemate/bible_nlt'}, **AGENTMAKE_CONFIG)
-    return getResponse(messages)
+    global run_bm_api, chapter2verses
+    request = chapter2verses(request)
+    return run_bm_api(f"verses:::NLT2015:::{request}")
 
 @mcp.tool
 def read_bible_commentary_cbsc(request:str) -> str:
-    """read the bible commentary 'Cambridge Bible for Schools and Colleges [57 vol.]'; bible verse reference(s) must be given"""
-    global agentmake, getResponse, AGENTMAKE_CONFIG
-    messages = agentmake(request, **{'input_content_plugin': 'uba/refs', 'tool': 'biblemate/commentary_csbc'}, **AGENTMAKE_CONFIG)
-    return getResponse(messages)
-
-@mcp.tool
-def read_bible_commentary_ivpbbc(request:str) -> str:
-    """read the bible commentary 'IVP Bible Background Commentary'; bible verse reference(s) must be given"""
-    global agentmake, getResponse, AGENTMAKE_CONFIG
-    messages = agentmake(request, **{'input_content_plugin': 'uba/refs', 'tool': 'biblemate/commentary_ivpbbc'}, **AGENTMAKE_CONFIG)
-    return getResponse(messages)
+    """read the bible commentary 'Cambridge Bible for Schools and Colleges [57 vol.]' on individual bible verses; bible verse reference(s) must be given, like , like John 3:16 or John 3:16-18"""
+    global run_bm_api, chapter2verses
+    request = chapter2verses(request)
+    return run_bm_api(f"commentary:::CBSC:::{request}")
 
 ###
 
